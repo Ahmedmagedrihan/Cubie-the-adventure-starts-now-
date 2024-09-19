@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Physics Game</title>
+  <style>
+    body, html { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      background-color: rgba(0, 0, 0, 0.7);
+      opacity: 0;
+      transition: opacity 2s ease-in-out;
+    }
+    #overlay.show {
+      opacity: 1;
+    }
+    #message {
+      color: white;
+      font-size: 3em;
+      opacity: 0;
+      transition: opacity 2s ease-in-out 1s;
+    }
+    #playButton {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 1.5em;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 2s ease-in-out 2s;
+    }
+    #jumpButton {
+      position: absolute;
+      bottom: 50px;
+      right: 50px;
+      width: 80px;
+      height: 80px;
+      font-size: 1.2em;
+      background-color: rgba(255, 255, 255, 0.8);
+      text-align: center;
+      line-height: 80px;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    #joystickContainer {
+      position: absolute;
+      bottom: 50px;
+      left: 50px;
+      width: 100px;
+      height: 100px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Overlay for Intro -->
+<div id="overlay">
+  <div id="message">This is your friend, Cubie!</div>
+  <div id="playButton">Play</div>
+</div>
+
+<!-- Jump Button -->
+<div id="jumpButton">Jump</div>
+
+<!-- Joystick -->
+<div id="joystickContainer"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+
+<script>
+  let gameStarted = false;
+
+  // THREE.js Setup
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // CANNON.js Setup
+  const world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+
+  const groundMaterial = new CANNON.Material();
+  const boxMaterial = new CANNON.Material();
+
+  // Ground
+  const groundShape = new CANNON.Plane();
+  const groundBody = new CANNON.Body({ mass: 0, material: groundMaterial });
+  groundBody.addShape(groundShape);
+  groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  world.addBody(groundBody);
+
+  const groundGeometry = new THREE.PlaneGeometry(100, 100);
+  const groundMaterialThree = new THREE.MeshBasicMaterial({ color: 0x3a5f5a, side: THREE.DoubleSide });
+  const groundMesh = new THREE.Mesh(groundGeometry, groundMaterialThree);
+  groundMesh.rotation.x = -Math.PI / 2;
+  scene.add(groundMesh);
+
+  // Box (Cubie)
+  const boxShape = new CANNON.Box(new CANNON.Vec3(1, 1, 1));
+  const boxBody = new CANNON.Body({ mass: 5, material: boxMaterial });
+  boxBody.addShape(boxShape);
+  boxBody.position.set(0, 5, 0);
+  world.addBody(boxBody);
+
+  const boxGeometry = new THREE.BoxGeometry(2, 2, 2);
+  const boxMaterialThree = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+  const boxMesh = new THREE.Mesh(boxGeometry, boxMaterialThree);
+  scene.add(boxMesh);
+
+  // Lighting
+  const light = new THREE.PointLight(0xffffff, 1, 100);
+  light.position.set(10, 10, 10);
+  scene.add(light);
+
+  camera.position.set(0, 10, 15);
+  camera.lookAt(0, 0, 0);
+
+  // Overlay elements
+  const overlay = document.getElementById('overlay');
+  const message = document.getElementById('message');
+  const playButton = document.getElementById('playButton');
+
+  // Show overlay when zoom completes
+  function showOverlay() {
+    overlay.classList.add('show');
+    message.style.opacity = 1;
+    playButton.style.opacity = 1;
+  }
+
+  // Play button click handler
+  playButton.addEventListener('click', () => {
+    overlay.style.display = 'none';
+    gameStarted = true;
+  });
+
+  // Dragging Camera
+  let isDragging = false;
+  let previousMousePosition = { x: 0, y: 0 };
+  let cameraRotationSpeed = 0.005;
+
+  window.addEventListener('mousedown', (event) => {
+    isDragging = true;
+    previousMousePosition = { x: event.clientX, y: event.clientY };
+  });
+
+  window.addEventListener('mousemove', (event) => {
+    if (!isDragging) return;
+
+    const deltaMove = { x: event.clientX - previousMousePosition.x, y: event.clientY - previousMousePosition.y };
+
+    const deltaRotationQuaternion = new THREE.Quaternion()
+      .setFromEuler(new THREE.Euler(0, deltaMove.x * cameraRotationSpeed, 0, 'XYZ'));
+
+    camera.quaternion.multiplyQuaternions(deltaRotationQuaternion, camera.quaternion);
+    previousMousePosition = { x: event.clientX, y: event.clientY };
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
+
+  // Touch drag for mobile camera control
+  window.addEventListener('touchstart', (event) => {
+    if (event.touches.length === 1) {
+      isDragging = true;
+      previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+    }
+  });
+
+  window.addEventListener('touchmove', (event) => {
+    if (isDragging && event.touches.length === 1) {
+      const deltaMove = { x: event.touches[0].clientX - previousMousePosition.x, y: event.touches[0].clientY - previousMousePosition.y };
+
+      const deltaRotationQuaternion = new THREE.Quaternion()
+        .setFromEuler(new THREE.Euler(0, deltaMove.x * cameraRotationSpeed, 0, 'XYZ'));
+
+      camera.quaternion.multiplyQuaternions(deltaRotationQuaternion, camera.quaternion);
+      previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+    }
+  });
+
+  window.addEventListener('touchend', () => {
+    isDragging = false;
+  });
+
+  // Jump Button
+  const jumpButton = document.getElementById('jumpButton');
+  jumpButton.addEventListener('click', () => {
+    boxBody.velocity.y = 5;
+  });
+
+  // Initialize Nipple.js Joystick
+  const joystickManager = nipplejs.create({
+    zone: document.getElementById('joystickContainer'),
+    mode: 'dynamic',
+    color: 'white',
+    size: 100,
+  });
+
+  joystickManager.on('move', (event, data) => {
+    if (gameStarted && data.vector) {
+      const speed = 15;  // Increased speed for more responsive movement
+      boxBody.velocity.x = data.vector.x * speed;
+      boxBody.velocity.z = -data.vector.y * speed; // Inverted to fix the forward/backward movement
+    }
+  });
+
+  // Animation Loop
+  function animate() {
+    requestAnimationFrame(animate);
+
+    world.step(1 / 60);
+
+    // Sync Box position
+    boxMesh.position.copy(boxBody.position);
+    boxMesh.quaternion.copy(boxBody.quaternion);
+
+    // Update camera position
+    camera.position.x = boxMesh.position.x;
+    camera.position.z = boxMesh.position.z + 10;
+    camera.lookAt(boxMesh.position);
+
+    renderer.render(scene, camera);
+  }
+
+  // Start the zoom-in animation and render loop
+  function initGame() {
+    camera.position.set(0, 50, 100);
+    new TWEEN.Tween(camera.position)
+      .to({ x: 0, y: 10, z: 15 }, 3000)
+      .easing(TWEEN.Easing.Elastic.Out)
+      .onComplete(showOverlay)
+      .start();
+
+    // Start rendering loop
+    animate();
+
+    // Start the Tween.js animation loop
+    function animateTweens() {
+      requestAnimationFrame(animateTweens);
+      TWEEN.update();
+    }
+    animateTweens();
+  }
+
+  // Initialize game on load
+  initGame();
+</script>
+
+</body>
+</html>
